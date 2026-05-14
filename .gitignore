@@ -1,0 +1,26 @@
+# Build artifacts
+StarShade.app/
+StarShade
+*.o
+*.d
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.Spotlight-V100
+.Trashes
+
+# IDE
+.idea/
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+*.swp
+*.swo
+*~
+
+# Diagnostic logs
+/tmp/starshade_diag.log

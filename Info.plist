@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.starshade.app</string>
+    <key>CFBundleName</key>
+    <string>StarShade</string>
+    <key>CFBundleDisplayName</key>
+    <string>StarShade</string>
+    <key>CFBundleExecutable</key>
+    <string>StarShade</string>
+    <key>CFBundleVersion</key>
+    <string>1.0.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.0</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>StarShade needs Screen Recording access to capture the game window and apply post-processing effects.</string>
+    <key>NSHumanReadableCopyright</key>
+    <string>StarShade — Post-processing shader overlay for macOS games</string>
+</dict>
+</plist>

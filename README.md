@@ -54,34 +54,15 @@ These shaders were inspired by popular ReShade custom creations. Feel free to mo
 
 ### Adding Custom Shaders
 
-Drop `.metal` files into the shaders directory:
+Drop `.txt` shader preset files into the shaders directory:
 
 ```
 ~/Library/Application Support/StarShade/Shaders/
 ```
 
-Each shader is a Metal fragment function with this signature:
+Press `Ctrl+Shift+L` to reload shaders without restarting. Or click reload shaders from the app icon in your task bar.
 
-```metal
-// Name: My Shader
-// Description: What it does
-
-fragment float4 fragment_main(VertexOut in [[stage_in]],
-                              texture2d<float> tex [[texture(0)]],
-                              sampler smp [[sampler(0)]],
-                              constant ShaderParams &params [[buffer(0)]]) {
-    float2 uv = in.texCoord;
-    float3 color = tex.sample(smp, uv).rgb;
-    // Your effect here
-    return float4(color, 1.0);
-}
-```
-
-Press `Ctrl+Shift+L` to reload shaders without restarting.
-
-### ReShade Preset Conversion
-
-Drop `.txt` ReShade preset files into the shaders directory. They are automatically parsed and converted to Metal shaders at load time.
+They are automatically parsed and converted to Metal shaders at load time.
 
 ## Persistent Permissions
 

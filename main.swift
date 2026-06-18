@@ -693,6 +693,9 @@ class OverlayController: NSObject {
     var targetWindow: SCWindow?
     var pollTimer: Timer?
     var trackingTimer: Timer?
+    var appFocusObserver: Any?
+    var targetAppBundleId: String?
+    var targetAppFocused: Bool = true
     var statusBar: StatusBarController?
     var isEnabled: Bool = true
     var overlayVisible: Bool = false
@@ -711,6 +714,8 @@ class OverlayController: NSObject {
     func stop() {
         pollTimer?.invalidate(); pollTimer = nil
         trackingTimer?.invalidate(); trackingTimer = nil
+        if let obs = appFocusObserver { NSWorkspace.shared.notificationCenter.removeObserver(obs) }
+        appFocusObserver = nil
         captureEngine?.stop()
         overlayWindow?.close(); overlayWindow = nil
     }
@@ -840,15 +845,19 @@ class OverlayController: NSObject {
                 print("")
             }
 
-            let target = content.windows.first { window in
-                let title = window.title ?? ""
-                let bundleId = window.owningApplication?.bundleIdentifier ?? ""
-                let appName = window.owningApplication?.applicationName ?? ""
-                let matches = bundleId.lowercased().contains(self.config.targetBundleId.lowercased())
-                    || title.lowercased().contains(self.config.targetWindowTitle.lowercased())
-                    || appName.lowercased().contains(self.config.targetWindowTitle.lowercased())
-                return matches && window.frame.width > 100 && window.frame.height > 100
-            }
+            // Pick the largest matching window — avoids accidentally grabbing small helper
+            // popups (e.g. AutoFill, tooltips) that share an app name with the real target.
+            let target = content.windows
+                .filter { window in
+                    let title = window.title ?? ""
+                    let bundleId = window.owningApplication?.bundleIdentifier ?? ""
+                    let appName = window.owningApplication?.applicationName ?? ""
+                    let matches = bundleId.lowercased().contains(self.config.targetBundleId.lowercased())
+                        || title.lowercased().contains(self.config.targetWindowTitle.lowercased())
+                        || appName.lowercased().contains(self.config.targetWindowTitle.lowercased())
+                    return matches && window.frame.width > 100 && window.frame.height > 100
+                }
+                .max(by: { ($0.frame.width * $0.frame.height) < ($1.frame.width * $1.frame.height) })
 
             if let target = target {
                 let title = target.title ?? "(untitled)"
@@ -968,8 +977,13 @@ class OverlayController: NSObject {
         overlayVisible = true
         diagLog("showOverlayIfNeeded() — making overlay VISIBLE")
         DispatchQueue.main.async {
-            window.orderFrontRegardless()
-            diagLog("🖥  Overlay now VISIBLE (first frame rendered successfully)")
+            // Only show immediately if the target app is currently frontmost
+            if self.targetAppFocused {
+                window.orderFrontRegardless()
+                diagLog("🖥  Overlay now VISIBLE (first frame rendered successfully)")
+            } else {
+                diagLog("🖥  First frame ready but target app not focused — overlay deferred")
+            }
         }
     }
 
@@ -1065,6 +1079,32 @@ class OverlayController: NSObject {
                         self.captureEngine?.updateSourceRect(frame)
                     }
                 }
+            }
+        }
+
+        // Hide overlay when target app loses focus; restore when it regains focus.
+        targetAppBundleId = target.owningApplication?.bundleIdentifier
+        targetAppFocused = true
+
+        if let obs = appFocusObserver { NSWorkspace.shared.notificationCenter.removeObserver(obs) }
+        appFocusObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self = self else { return }
+            let activeBundleId = (notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?.bundleIdentifier ?? ""
+            let isTarget = activeBundleId == self.targetAppBundleId
+            guard isTarget != self.targetAppFocused else { return }
+            self.targetAppFocused = isTarget
+            if isTarget {
+                if self.isEnabled, let window = self.overlayWindow {
+                    window.orderFrontRegardless()
+                    diagLog("👁  Target app focused — overlay shown")
+                }
+            } else {
+                self.overlayWindow?.orderOut(nil)
+                diagLog("👁  Target app unfocused — overlay hidden")
             }
         }
     }

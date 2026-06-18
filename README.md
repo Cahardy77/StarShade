@@ -81,17 +81,17 @@ After this, permission persists across rebuilds.
 ## Configuration
 
 ```bash
-# Target a different game window
-"StarShade.app/Contents/MacOS/StarShade" --window "GameTitle"
+# Target a different game window - I placed in Applications for easy access, but you can put it anywhere
+/Applications/StarShade.app/Contents/MacOS/StarShade --window "Google Chrome"
 
 # Use a specific bundle ID
-"StarShade.app/Contents/MacOS/StarShade" --bundle "com.game.app"
+/Applications/StarShade.app/Contents/MacOS/StarShade  --bundle "com.game.app"
 
 # Start with a specific shader
-"StarShade.app/Contents/MacOS/StarShade" --shader lut
+/Applications/StarShade.app/Contents/MacOS/StarShade  --shader lut
 
 # Custom frame rate
-"StarShade.app/Contents/MacOS/StarShade" --fps 30
+/Applications/StarShade.app/Contents/MacOS/StarShade  --fps 30
 ```
 
 ## Requirements

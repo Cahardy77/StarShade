@@ -529,7 +529,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
 // MARK: - Status Bar Controller
 
-class StatusBarController {
+class StatusBarController: NSObject, NSMenuDelegate {
     let statusItem: NSStatusItem
     weak var overlayController: OverlayController?
     let shaderManager: ShaderManager
@@ -538,11 +538,14 @@ class StatusBarController {
     var fpsMenuItem: NSMenuItem?
     var sharpnessMenuItem: NSMenuItem?
     var statusMenuItem: NSMenuItem?
+    var windowSubMenuItem: NSMenuItem?
+    var windowSubmenu: NSMenu?
 
     init(overlayController: OverlayController, shaderManager: ShaderManager) {
         self.overlayController = overlayController
         self.shaderManager = shaderManager
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        super.init()
         statusItem.button?.title = "🎨"
         statusItem.button?.toolTip = "StarShade"
         buildMenu()
@@ -567,6 +570,19 @@ class StatusBarController {
         fpsMenuItem = NSMenuItem(title: "FPS: —", action: nil, keyEquivalent: "")
         fpsMenuItem?.isEnabled = false
         menu.addItem(fpsMenuItem!)
+
+        menu.addItem(NSMenuItem.separator())
+
+        // Target window selection submenu
+        let winSubmenu = NSMenu()
+        let loadingItem = NSMenuItem(title: "Loading windows…", action: nil, keyEquivalent: "")
+        loadingItem.isEnabled = false
+        winSubmenu.addItem(loadingItem)
+        let winSubItem = NSMenuItem(title: "🎯 Target Window", action: nil, keyEquivalent: "")
+        winSubItem.submenu = winSubmenu
+        menu.addItem(winSubItem)
+        windowSubMenuItem = winSubItem
+        windowSubmenu = winSubmenu
 
         menu.addItem(NSMenuItem.separator())
 
@@ -638,6 +654,7 @@ class StatusBarController {
         let quit = NSMenuItem(title: "Quit StarShade", action: #selector(doQuit), keyEquivalent: "q")
         quit.target = self; menu.addItem(quit)
 
+        menu.delegate = self
         statusItem.menu = menu
     }
 
@@ -662,6 +679,79 @@ class StatusBarController {
         AXIsProcessTrustedWithOptions(opts)
     }
     @objc func doQuit() { NSApp.terminate(nil) }
+
+    // MARK: - NSMenuDelegate
+
+    func menuWillOpen(_ menu: NSMenu) {
+        refreshWindowList()
+    }
+
+    // MARK: - Window Selection
+
+    func refreshWindowList() {
+        SCShareableContent.getExcludingDesktopWindows(true, onScreenWindowsOnly: true) { [weak self] content, error in
+            guard let self = self else { return }
+
+            let starShadeBundleId = Bundle.main.bundleIdentifier ?? ""
+
+            let windows: [SCWindow]
+            if let content = content {
+                windows = content.windows.filter { window in
+                    // Must have a bundle ID
+                    guard let bundleId = window.owningApplication?.bundleIdentifier,
+                          !bundleId.isEmpty else { return false }
+                    // Must be a real-sized window
+                    guard window.frame.width >= 300 && window.frame.height >= 150 else { return false }
+                    // Must have a non-empty title
+                    guard let title = window.title, !title.isEmpty else { return false }
+                    // Exclude Apple system apps
+                    guard !bundleId.hasPrefix("com.apple.") else { return false }
+                    // Exclude StarShade itself
+                    guard bundleId != starShadeBundleId else { return false }
+                    return true
+                }
+                .sorted {
+                    ($0.owningApplication?.applicationName ?? "").lowercased() <
+                    ($1.owningApplication?.applicationName ?? "").lowercased()
+                }
+            } else {
+                windows = []
+            }
+
+            DispatchQueue.main.async {
+                guard let submenu = self.windowSubmenu else { return }
+                submenu.removeAllItems()
+
+                if windows.isEmpty {
+                    let emptyItem = NSMenuItem(title: "No eligible windows found", action: nil, keyEquivalent: "")
+                    emptyItem.isEnabled = false
+                    submenu.addItem(emptyItem)
+                } else {
+                    for window in windows {
+                        let appName = window.owningApplication?.applicationName ?? "Unknown"
+                        let winTitle = window.title ?? appName
+                        let label = winTitle == appName ? appName : "\(appName) — \(winTitle)"
+                        let item = NSMenuItem(title: label, action: #selector(self.selectTargetWindow(_:)), keyEquivalent: "")
+                        item.target = self
+                        item.representedObject = window
+                        if window.windowID == self.overlayController?.targetWindow?.windowID {
+                            item.state = .on
+                        }
+                        submenu.addItem(item)
+                    }
+                }
+            }
+        }
+    }
+
+    @objc func selectTargetWindow(_ sender: NSMenuItem) {
+        guard let window = sender.representedObject as? SCWindow else { return }
+        let appName = window.owningApplication?.applicationName ?? "Unknown"
+        let winTitle = window.title ?? appName
+        let label = winTitle == appName ? appName : "\(appName) — \(winTitle)"
+        windowSubMenuItem?.title = "🎯 \(label)"
+        overlayController?.retargetWindow(scWindow: window)
+    }
 
     func updateStatus(text: String) { DispatchQueue.main.async { self.statusMenuItem?.title = text } }
     func updateFPS(_ fps: Double) { DispatchQueue.main.async { self.fpsMenuItem?.title = "FPS: \(String(format: "%.1f", fps))" } }
@@ -701,11 +791,15 @@ class OverlayController: NSObject {
     var overlayVisible: Bool = false
     var currentShaderName: String
     var currentSharpness: Float = 0.5
+    var currentTargetTitle: String
+    var currentTargetBundleId: String
 
     init(config: OverlayConfig, shaderManager: ShaderManager) {
         self.config = config
         self.shaderManager = shaderManager
         self.currentShaderName = config.shaderName
+        self.currentTargetTitle = config.targetWindowTitle
+        self.currentTargetBundleId = config.targetBundleId
         super.init()
     }
 
@@ -805,6 +899,36 @@ class OverlayController: NSObject {
         print("✅ Shaders reloaded (\(shaderManager.shaders.count) found)")
     }
 
+    func retargetWindow(scWindow: SCWindow) {
+        let title = scWindow.title ?? scWindow.owningApplication?.applicationName ?? ""
+        let bundleId = scWindow.owningApplication?.bundleIdentifier ?? ""
+        let appName = scWindow.owningApplication?.applicationName ?? "Unknown"
+
+        diagLog("🎯 Retargeting to: \"\(title)\" (\(bundleId))")
+        statusBar?.updateStatus(text: "🔄 Switching to \(appName)…")
+
+        // Tear down current capture
+        pollTimer?.invalidate(); pollTimer = nil
+        trackingTimer?.invalidate(); trackingTimer = nil
+        if let obs = appFocusObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(obs)
+        }
+        appFocusObserver = nil
+        captureEngine?.stop()
+        captureEngine = nil
+        overlayWindow?.close()
+        overlayWindow = nil
+        overlayVisible = false
+        targetWindow = nil
+
+        // Update target criteria
+        currentTargetTitle = title
+        currentTargetBundleId = bundleId
+
+        // Restart discovery
+        findTargetWindow()
+    }
+
     private func showPermissionErrorOnce() {
         guard let appDelegate = NSApp.delegate as? AppDelegate,
               !appDelegate.hasShownPermissionAlert else { return }
@@ -852,9 +976,9 @@ class OverlayController: NSObject {
                     let title = window.title ?? ""
                     let bundleId = window.owningApplication?.bundleIdentifier ?? ""
                     let appName = window.owningApplication?.applicationName ?? ""
-                    let matches = bundleId.lowercased().contains(self.config.targetBundleId.lowercased())
-                        || title.lowercased().contains(self.config.targetWindowTitle.lowercased())
-                        || appName.lowercased().contains(self.config.targetWindowTitle.lowercased())
+                    let matches = (!self.currentTargetBundleId.isEmpty && bundleId.lowercased().contains(self.currentTargetBundleId.lowercased()))
+                        || (!self.currentTargetTitle.isEmpty && (title.lowercased().contains(self.currentTargetTitle.lowercased())
+                            || appName.lowercased().contains(self.currentTargetTitle.lowercased())))
                     return matches && window.frame.width > 100 && window.frame.height > 100
                 }
                 .max(by: { ($0.frame.width * $0.frame.height) < ($1.frame.width * $1.frame.height) })
@@ -874,7 +998,7 @@ class OverlayController: NSObject {
                 }
             } else {
                 if self.pollTimer == nil {
-                    diagLog("⏳ Game window not found. Waiting for: \"\(self.config.targetWindowTitle)\"")
+                    diagLog("⏳ Window not found. Waiting for: \"\(self.currentTargetTitle)\"")
                     self.statusBar?.updateStatus(text: "⏳ Waiting for game...")
                     DispatchQueue.main.async { self.startPolling() }
                 }
